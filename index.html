@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Receive &amp; Sort</title>
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Receive+Sort">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<meta name="theme-color" content="#D6196C">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fx.css">
+<link rel="stylesheet" href="app.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js" defer></script>
+</head>
+<body>
+<div id="screen-flash" aria-hidden="true"></div>
+<header class="fx-header app-header">
+  <canvas id="fx-bg"></canvas>
+  <div class="hdr-row">
+    <div>
+      <h1>Receive &amp; Sort</h1>
+      <div class="hdr-sub">Scan PO → pallet · SKU → Qty · upload to ShipHero</div>
+    </div>
+    <div class="hdr-actions">
+      <span id="net" class="net" title="Connection">●</span>
+      <button class="icon-btn fx-press" data-fx-calm title="Animations on/off" aria-label="Animations on/off">✨</button>
+      <button class="icon-btn fx-press" id="btn-settings" title="Settings" aria-label="Settings">⚙</button>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="scan" class="tab active">Scan</button>
+    <button role="tab" data-tab="saved" class="tab">Saved <span id="saved-badge" class="badge" hidden>0</span></button>
+    <button role="tab" data-tab="pallets" class="tab">Pallets</button>
+    <button role="tab" data-tab="history" class="tab">History</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ============ SCAN ============ -->
+  <section id="view-scan" class="view">
+    <div id="truck-bar" class="truck-bar no-truck">
+      <div><b id="truck-label">No truck in progress</b> <span id="truck-used" class="sub"></span></div>
+      <button id="btn-truck" class="btn sm fx-press" type="button">Start Truck</button>
+    </div>
+
+    <div id="pallet" class="pallet" hidden aria-live="assertive"></div>
+
+    <ol class="steps" aria-label="Scan steps">
+      <li data-step="po">PO</li><li data-step="loc">Loc</li><li data-step="sku">SKU</li><li data-step="size" class="optional" title="Only when size is a separate barcode">Size</li><li data-step="qty">Qty</li>
+    </ol>
+
+    <div id="msg" class="msg" role="status" aria-live="assertive">Scan a PO number to start.</div>
+
+    <details class="card fai-list-card" id="fai-wrap" hidden>
+      <summary><b>FAI first</b> — <span id="fai-count">0</span> open POs need First Article Inspection</summary>
+      <ul id="fai-list" class="fai-list"></ul>
+    </details>
+
+    <div class="card">
+      <div class="card-head"><label for="in-po">PO number</label><button id="btn-sync" class="link sync" title="Reload open POs from ShipHero"><span id="sync-status">Open POs: —</span> ↻</button></div>
+      <div class="row">
+        <input id="in-po" class="scan" list="open-pos" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Scan or type PO">
+        <datalist id="open-pos"></datalist>
+        <button id="btn-po" class="btn fx-press">Load</button>
+      </div>
+      <div id="po-card" class="po-card" hidden></div>
+    </div>
+
+    <div class="card">
+      <label for="in-loc">Location <span class="hint">(defaults to Receiving — scan a location barcode any time to change)</span></label>
+      <input id="in-loc" class="scan" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Scan location barcode" disabled>
+      <div id="loc-card" class="loc-card" hidden></div>
+    </div>
+
+    <div class="card">
+      <label for="in-sku">SKU</label>
+      <input id="in-sku" class="scan" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Scan SKU" disabled>
+      <div id="line-card" class="line-card" hidden></div>
+    </div>
+
+    <div class="card" id="size-wrap" hidden>
+      <label for="in-size">Size <span class="hint">(separate size barcode)</span></label>
+      <input id="in-size" class="scan" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Scan size" disabled>
+      <div id="size-opts" class="size-opts"></div>
+    </div>
+
+    <div class="card">
+      <label for="in-qty">Quantity</label>
+      <div class="row">
+        <input id="in-qty" class="scan qty" inputmode="numeric" autocomplete="off" placeholder="Scan or type qty" disabled>
+        <button id="btn-save" class="btn primary fx-press" disabled>Save</button>
+      </div>
+    </div>
+
+    <div class="card" id="recent-wrap" hidden>
+      <div class="card-head"><h2>Last scans on this PO</h2><button id="btn-undo" class="link">Undo last</button></div>
+      <ul id="recent" class="recent"></ul>
+    </div>
+  </section>
+
+  <!-- ============ SAVED ============ -->
+  <section id="view-saved" class="view" hidden>
+    <div id="batch-alerts"></div>
+    <div id="saved-list"></div>
+    <div class="sticky-bar">
+      <button id="btn-export" class="btn fx-press">Export CSV</button>
+      <button id="btn-upload" class="btn primary fx-press" disabled>Upload all to ShipHero</button>
+    </div>
+  </section>
+
+  <!-- ============ PALLETS ============ -->
+  <section id="view-pallets" class="view" hidden>
+    <p class="hint">POs on this truck and their pallets — every device, refreshes every few seconds.</p>
+    <div id="pallet-list"></div>
+  </section>
+
+  <!-- ============ HISTORY ============ -->
+  <section id="view-history" class="view" hidden>
+    <p class="hint">Uploads from this device, last 30 days.</p>
+    <div id="history-list"></div>
+  </section>
+</main>
+
+<!-- confirm upload -->
+<dialog id="dlg-upload" class="dlg">
+  <h2>Upload to ShipHero?</h2>
+  <div id="upload-summary"></div>
+  <p class="hint">For each line this <b>adds the units to the scanned location</b> (logged in ShipHero's inventory history with the PO number and your initials), then adds them to <b>Quantity received</b> on the PO.</p>
+  <div class="dlg-actions">
+    <button class="btn" value="cancel" id="dlg-upload-cancel">Cancel</button>
+    <button class="btn primary" id="dlg-upload-go">Upload</button>
+  </div>
+</dialog>
+
+<!-- settings / PIN -->
+<dialog id="dlg-settings" class="dlg">
+  <h2>Settings</h2>
+  <label for="in-pin">App PIN</label>
+  <input id="in-pin" type="password" autocomplete="off" inputmode="numeric" placeholder="PIN from your manager">
+  <label for="in-receiver">Receiver initials (optional)</label>
+  <input id="in-receiver" maxlength="8" autocomplete="off" placeholder="e.g. JD">
+  <label class="check"><input type="checkbox" id="in-sound" checked> Beep on scan</label>
+  <div class="dlg-actions">
+    <button class="btn" id="dlg-settings-cancel">Close</button>
+    <button class="btn primary" id="dlg-settings-save">Save</button>
+  </div>
+</dialog>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script src="fx.js" defer></script>
+</body>
+</html>

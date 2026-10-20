@@ -1,0 +1,25 @@
+{
+  "name": "Receive & Sort",
+  "short_name": "Receive+Sort",
+  "description": "Pink Lily receiving + truck unload pallet sorting",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FAF6F9",
+  "theme_color": "#D6196C",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+/* ============================================================
+   Pink Lily Web FX — drop-in styles for GSAP + Three.js motion
+   Pair with fx.js. Theme via the CSS variables below.
+   ============================================================ */
+:root{
+  --pl-pink:#D6196C; --pl-pink-dark:#A8124F; --pl-pink-soft:#FCE7F0; --pl-pink-softer:#FDF3F8;
+  --pl-ink:#171318; --pl-grey:#453F4B; --pl-grey-soft:#665F6D; --pl-line:#E4D8E1;
+  --pl-bg:#FFFFFF; --pl-bg-alt:#FAF6F9;
+  --fx-shadow:0 1px 3px rgba(31,27,29,.08),0 4px 16px rgba(31,27,29,.06);
+}
+
+/* ---- animated brand header (holds the Three.js petal canvas) ---- */
+.fx-header{ position:relative; overflow:hidden;
+  background:linear-gradient(100deg,var(--pl-pink),var(--pl-pink-dark)); color:#fff; }
+.fx-header #fx-bg{ position:absolute; inset:0; width:100%; height:100%; display:block; z-index:0; pointer-events:none; }
+.fx-header > :not(#fx-bg){ position:relative; z-index:1; }
+
+/* ---- optional full-page fog background (Vanta) ---- */
+#fx-fog{ position:fixed; inset:-6%; z-index:-2; pointer-events:none; transition:transform .35s ease-out; will-change:transform; }
+/* soft static gradient fallback (shows if Vanta/Three are blocked) */
+body.fx-bg::before{ content:""; position:fixed; inset:-25%; z-index:-3; pointer-events:none;
+  background:
+    radial-gradient(38% 38% at 12% 18%, rgba(214,25,108,.16), transparent 62%),
+    radial-gradient(42% 42% at 88% 12%, rgba(236,72,153,.14), transparent 62%),
+    radial-gradient(48% 48% at 80% 88%, rgba(168,18,79,.12), transparent 62%),
+    radial-gradient(46% 46% at 18% 92%, rgba(255,205,230,.55), transparent 62%);
+  animation:fx-drift 26s ease-in-out infinite alternate; }
+@keyframes fx-drift{ 0%{transform:translate3d(0,0,0) scale(1)} 100%{transform:translate3d(0,-3.5%,0) scale(1.07)} }
+
+/* ---- micro-interactions ---- */
+.fx-lift{ transition:transform .18s ease, box-shadow .18s ease; }
+.fx-lift:hover{ transform:translateY(-3px); box-shadow:0 8px 22px rgba(214,25,108,.16); }
+.fx-press{ transition:transform .12s ease; }
+.fx-press:active{ transform:scale(.96); }
+
+/* ---- pulse helpers (e.g. an urgent badge) ---- */
+@keyframes fx-pulse{ 0%,100%{box-shadow:0 0 0 0 rgba(214,25,108,.55)} 50%{box-shadow:0 0 0 6px rgba(214,25,108,0)} }
+.fx-pulse{ animation:fx-pulse 1.8s ease-out infinite; }
+
+/* ---- accessibility + calm mode: kill motion ---- */
+body.calm #fx-bg, body.calm #fx-fog{ display:none !important; }
+body.calm::before{ animation:none; }
+body.calm .fx-lift, body.calm .fx-press, body.calm .fx-pulse{ transition:none; animation:none; }
+@media (prefers-reduced-motion: reduce){
+  body.fx-bg::before, .fx-pulse{ animation:none; }
+  .fx-lift, .fx-press{ transition:none; }
+}
