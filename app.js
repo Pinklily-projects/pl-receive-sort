@@ -30,7 +30,7 @@
 
   // ---------------------------------------------------------------- storage
   const blank = () => ({
-    pos: {}, scans: [], batches: [], poLoc: {}, locs: {}, open: { keys: [], at: 0 }, truck: null, palletMap: {},
+    pos: {}, scans: [], batches: [], poLoc: {}, locs: {}, open: { keys: [], at: 0 }, truck: null, palletMap: {}, faiSent: {},
     settings: { pin: "", receiver: "", sound: true }, defaultLoc: "Receiving",
   });
   let S = load();
@@ -56,6 +56,10 @@
     if (cur.po) live.add(cur.po); // prune only runs after boot, so cur exists
     for (const k of Object.keys(S.pos)) if (!live.has(k)) delete S.pos[k];
     for (const k of Object.keys(S.poLoc)) if (!live.has(k)) delete S.poLoc[k];
+    for (const k of Object.keys(S.faiSent)) {
+      const f = S.faiSent[k];
+      if (Date.now() - f.ts > 14 * 864e5 && !S.scans.some((x) => norm(x.sku) === k)) delete S.faiSent[k];
+    }
     for (const k of Object.keys(S.palletMap)) if (!S.truck || k !== S.truck.id) delete S.palletMap[k];
   }
 
@@ -165,6 +169,11 @@
   // FAI: lines whose product has no weight/dimensions in ShipHero and still have units to receive
   const faiLines = (po) => (po && po.lines ? po.lines.filter((l) => l.fai && l.received < l.ordered) : []);
   const isFai = (poKey, sku) => { const l = lineFor(S.pos[poKey], sku); return !!(l && l.fai); };
+  // FAI: only the FIRST unit of an FAI SKU is flagged (pulled to the FAI location to be dimmed).
+  // Every later scan of that SKU — on any PO — is received normally with no alert.
+  // S.faiSent[SKU] = { sku, po_number, ts, by } once that first unit has been sent.
+  const FAI_LOC = (window.PL_SORT_CONFIG && window.PL_SORT_CONFIG.faiLocationName) || "FAI location";
+  const faiSentFor = (sku) => S.faiSent[norm(sku)] || null;
 
   function applyPO(po) {
     const key = norm(po.po_number);
@@ -460,8 +469,8 @@
     const key = cur.po;
     // FAI no longer stops the flow: FAI SKUs get flagged when scanned and must be cleared on the
     // FAI check page before anything is posted to ShipHero.
-    const faiN = faiLines(po).length;
-    const pre2 = faiN ? `${pre}${faiN} SKU${faiN > 1 ? "s" : ""} on this PO need${faiN > 1 ? "" : "s"} FAI — they'll be flagged. ` : pre;
+    const faiN = faiLines(po).filter((l) => !faiSentFor(l.sku)).length;
+    const pre2 = faiN ? `${pre}${faiN} FAI SKU${faiN > 1 ? "s" : ""} on this PO — you'll be told when to pull 1 to the ${FAI_LOC}. ` : pre;
     if (S.poLoc[key]) { renderLocCard(); say(faiN ? "warn" : kind, `${pre2}Putting away to ${S.poLoc[key].name}. Scan a SKU.`); setStep("sku"); renderPallet(); return; }
     // No location yet → use the default (Receiving). Scanning a location barcode later changes it.
     $("loc-card").hidden = true;
@@ -523,11 +532,11 @@
   }
 
   function holdBox(po) {
-    const lines = faiLines(po);
+    const lines = faiLines(po).filter((l) => !faiSentFor(l.sku));
     if (!lines.length) return "";
     const shown = lines.slice(0, 12).map((l) => `<li><span class="mono">${esc(l.sku)}</span> <span class="sub">${esc(l.name || "")}</span></li>`).join("");
-    return `<div class="fai-hold"><b>FAI needed — note these and keep going</b>
-      <div class="sub">These SKUs have no weight/dimensions in ShipHero. Keep receiving; they're flagged when scanned. Finish their First Article Inspection in ShipHero before uploading — the FAI check before upload makes sure.</div>
+    return `<div class="fai-hold"><b>FAI SKUs on this PO</b>
+      <div class="sub">No weight/dimensions in ShipHero yet. Keep receiving — on the first scan of each, pull 1 unit to the ${esc(FAI_LOC)} to be dimmed. Later scans of the same SKU are received normally. Upload waits until they're dimmed.</div>
       <ul>${shown}${lines.length > 12 ? `<li class="sub">+${lines.length - 12} more</li>` : ""}</ul>
       <button class="btn sm" id="btn-recheck-fai">Re-check FAI</button></div>`;
   }
@@ -615,7 +624,7 @@
     cur.line = line; cur.overConfirm = null;
     if (!cur.base) $("in-sku").value = line.sku;
     renderLineCard();
-    if (line.fai) { beep("err"); say("warn", `⚠ FAI NEEDED — ${line.sku} has no weight/dims in ShipHero. Note it and keep going; it must be done before upload. Scan or type the quantity.`); }
+    if (line.fai && !faiSentFor(line.sku)) { beep("err"); setTimeout(() => beep("err"), 260); say("fai", `⚠ FAI — pull 1 × ${line.sku} and take it to the ${FAI_LOC} to be dimmed. Then scan or type the quantity (include that unit).`); }
     else { beep("ok"); say("ok", `${line.sku} — scan or type the quantity.`); }
     $("in-qty").value = "";
     setStep("qty");
@@ -650,7 +659,7 @@
     if (!l) { $("line-card").hidden = true; return; }
     const pend = pendingQty(cur.po, l.sku) + (extra || 0);
     const remaining = l.ordered - l.received - pend;
-    $("line-card").innerHTML = `<b class="mono">${esc(l.sku)}</b>${l.fai ? ' <span class="fai-tag">FAI NEEDED</span>' : ""}<div>${esc(l.name || "")}</div>
+    $("line-card").innerHTML = `<b class="mono">${esc(l.sku)}</b>${l.fai ? (faiSentFor(l.sku) ? ' <span class="fai-tag soft">FAI sent</span>' : ` <span class="fai-tag">FAI → ${esc(FAI_LOC)}</span>`) : ""}<div>${esc(l.name || "")}</div>
       <div class="nums">
         <div><span>Ordered</span><strong>${l.ordered}</strong></div>
         <div><span>In ShipHero</span><strong>${l.received}</strong></div>
@@ -679,10 +688,12 @@
       say("warn", `That's ${qty - Math.max(remaining, 0)} over the PO. Press Enter again to save anyway, or fix the qty.`);
       return;
     }
-    S.scans.push({ id: uid(), po: cur.po, sku: l.sku, qty, loc: { id: loc.id, name: loc.name }, ts: Date.now(), by: S.settings.receiver || "", fai: !!l.fai });
+    const faiFirst = !!l.fai && !faiSentFor(l.sku);
+    S.scans.push({ id: uid(), po: cur.po, sku: l.sku, qty, loc: { id: loc.id, name: loc.name }, ts: Date.now(), by: S.settings.receiver || "", fai: !!l.fai, faiFirst });
+    if (faiFirst) S.faiSent[norm(l.sku)] = { sku: l.sku, po_number: po.po_number, ts: Date.now(), by: S.settings.receiver || "" };
     save();
     beep("save");
-    say(l.fai ? "warn" : "ok", `Saved ${qty} × ${l.sku} → ${loc.name}${l.fai ? " · FAI flagged" : ""}. Scan the next PO.`);
+    say(faiFirst ? "fai" : "ok", `Saved ${qty} × ${l.sku} → ${loc.name}${faiFirst ? ` · 1 to ${FAI_LOC} for dims` : ""}. Scan the next PO.`);
     cur.overConfirm = null;
     renderLineCard();
     renderRecent(); renderBadge();
@@ -696,13 +707,14 @@
   function renderRecent() {
     const list = S.scans.filter((x) => x.po === cur.po).slice(-5).reverse();
     $("recent-wrap").hidden = !list.length;
-    $("recent").innerHTML = list.map((x) => `<li><span class="mono">${esc(x.sku)}${isFai(x.po, x.sku) ? ' <span class="fai-tag">FAI</span>' : ""}</span><span><b>${x.qty}</b> → ${esc(x.loc ? x.loc.name : "?")} · ${fmtTime(x.ts)}</span></li>`).join("");
+    $("recent").innerHTML = list.map((x) => `<li><span class="mono">${esc(x.sku)}${x.faiFirst ? ' <span class="fai-tag">FAI</span>' : ""}</span><span><b>${x.qty}</b> → ${esc(x.loc ? x.loc.name : "?")} · ${fmtTime(x.ts)}</span></li>`).join("");
   }
 
   function undoLast() {
     for (let i = S.scans.length - 1; i >= 0; i--) {
       if (S.scans[i].po === cur.po) {
         const x = S.scans.splice(i, 1)[0];
+        if (x.faiFirst) delete S.faiSent[norm(x.sku)];
         save(); renderRecent(); renderBadge();
         if (cur.line && norm(cur.line.sku) === norm(x.sku)) renderLineCard();
         say("warn", `Removed ${x.qty} × ${x.sku}.`);
@@ -762,7 +774,7 @@
           const pl = lineFor(po, ln.sku) || { ordered: 0, received: 0, name: "" };
           const after = pl.received + pendingQty(g.po, ln.sku);
           const over = after - pl.ordered;
-          return `<tr><td><span class="mono">${esc(ln.sku)}</span>${pl.fai ? '<span class="fai-tag">FAI</span>' : ""}${over > 0 ? `<span class="over-tag">+${over} over</span>` : ""}<div class="sub">${esc(pl.name || "")}</div></td>
+          return `<tr><td><span class="mono">${esc(ln.sku)}</span>${pl.fai ? '<span class="fai-tag">needs dims</span>' : ""}${over > 0 ? `<span class="over-tag">+${over} over</span>` : ""}<div class="sub">${esc(pl.name || "")}</div></td>
             <td class="num"><b>${ln.qty}</b><div class="sub">${ln.scans} scan${ln.scans > 1 ? "s" : ""}</div></td>
             <td class="num">${pl.received} → ${after}<div class="sub">of ${pl.ordered}</div></td>
             <td class="num"><button class="link" data-del-sku="${esc(k)}" data-sku="${esc(ln.sku)}" aria-label="Remove">✕</button></td></tr>`;
@@ -809,16 +821,16 @@
     const out = {};
     for (const x of S.scans) {
       if (!isFai(x.po, x.sku)) continue;
-      const k = `${x.po}|${norm(x.sku)}`;
+      const k = norm(x.sku);
       const l = lineFor(S.pos[x.po], x.sku);
-      const o = out[k] || (out[k] = { po: x.po, po_number: (S.pos[x.po] || {}).po_number || x.po, sku: l ? l.sku : x.sku, name: l ? l.name : "", qty: 0 });
-      o.qty += x.qty;
+      const o = out[k] || (out[k] = { sku: l ? l.sku : x.sku, name: l ? l.name : "", qty: 0, pos: new Set() });
+      o.qty += x.qty; o.pos.add((S.pos[x.po] || {}).po_number || x.po);
     }
     return Object.values(out);
   }
   function everFlagged() {
     const seen = {};
-    for (const x of S.scans) if (x.fai || isFai(x.po, x.sku)) seen[`${x.po}|${norm(x.sku)}`] = { po: x.po, sku: x.sku };
+    for (const x of S.scans) if (x.fai || isFai(x.po, x.sku)) seen[norm(x.sku)] = { po: x.po, sku: x.sku };
     return Object.values(seen);
   }
   async function refreshScanPOs() {
@@ -840,11 +852,15 @@
     const failed = await refreshScanPOs();
     const left = faiPending();
     const done = everFlagged().filter((f) => !isFai(f.po, f.sku));
-    const rows = left.map((f) => `<li class="fai-row bad"><span>✖</span><span class="grow"><span class="mono">${esc(f.sku)}</span> · PO ${esc(f.po_number)}<div class="sub">${esc(f.name || "")} · ${f.qty} units saved · no weight/dims in ShipHero yet</div></span></li>`)
-      .concat(done.map((f) => `<li class="fai-row ok"><span>✔</span><span class="grow"><span class="mono">${esc(f.sku)}</span> · PO ${esc((S.pos[f.po] || {}).po_number || f.po)}<div class="sub">FAI done</div></span></li>`));
+    const sentTxt = (sku) => { const f = faiSentFor(sku); return f ? `1 sent to ${esc(FAI_LOC)} ${fmtTime(f.ts)}${f.by ? " by " + esc(f.by) : ""}` : "not sent to FAI yet"; };
+    const rows = left.map((f) => `<li class="fai-row bad"><span>✖</span><span class="grow"><span class="mono">${esc(f.sku)}</span> · PO ${[...f.pos].map(esc).join(", ")}<div class="sub">${esc(f.name || "")} · ${f.qty} units saved · ${sentTxt(f.sku)} · not dimmed in ShipHero yet</div></span></li>`)
+      .concat(done.map((f) => `<li class="fai-row ok"><span>✔</span><span class="grow"><span class="mono">${esc(f.sku)}</span><div class="sub">Dimmed in ShipHero — FAI done</div></span></li>`));
+    // SKUs that are now dimmed no longer need tracking
+    for (const k of Object.keys(S.faiSent)) if (done.some((f) => norm(f.sku) === k)) delete S.faiSent[k];
+    save();
     $("fai-summary").innerHTML = (failed ? `<div class="alert warn">Couldn't refresh ${failed} PO(s) from ShipHero — showing the last saved data.</div>` : "")
       + (left.length
-        ? `<p><b>${left.length}</b> SKU${left.length > 1 ? "s" : ""} still need${left.length > 1 ? "" : "s"} FAI. Finish them in ShipHero (weight + dimensions), then tap <b>Re-check</b>.</p>`
+        ? `<p><b>${left.length}</b> SKU${left.length > 1 ? "s" : ""} still need${left.length > 1 ? "" : "s"} to be dimmed. Enter weight + dimensions in ShipHero for the units at the ${esc(FAI_LOC)}, then tap <b>Re-check</b>.</p>`
         : `<p class="ok-text"><b>All FAI done.</b> You can upload.</p>`)
       + (rows.length ? `<ul class="fai-check">${rows.join("")}</ul>` : "");
     again.disabled = false;

@@ -7,4 +7,6 @@ window.PL_SORT_CONFIG = {
   supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkYW5pZmZleHhtZHRqcHR5ZnNoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0ODAyODksImV4cCI6MjA5ODA1NjI4OX0._2wiDu0X9J9a-Oz-kUktHRMXeFVGEXzkFA0djewlBTs",
   // 4-digit code to reset a truck that's already in progress (floor guard, not security).
   resetPin: "0901",
+  // Name shown to receivers for where the first unit of an FAI SKU goes to be dimmed.
+  faiLocationName: "FAI location",
 };
