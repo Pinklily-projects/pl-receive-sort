@@ -58,7 +58,7 @@
     <div id="msg" class="msg" role="status" aria-live="assertive">Scan a PO number to start.</div>
 
     <details class="card fai-list-card" id="fai-wrap" hidden>
-      <summary><b>FAI first</b> — <span id="fai-count">0</span> open POs need First Article Inspection</summary>
+      <summary><b>FAI items</b> — <span id="fai-count">0</span> open POs have SKUs needing First Article Inspection</summary>
       <ul id="fai-list" class="fai-list"></ul>
     </details>
 
@@ -135,6 +135,18 @@
   <div class="dlg-actions">
     <button class="btn" value="cancel" id="dlg-upload-cancel">Cancel</button>
     <button class="btn primary" id="dlg-upload-go">Upload</button>
+  </div>
+</dialog>
+
+<!-- FAI check (before upload) -->
+<dialog id="dlg-fai" class="dlg">
+  <h2>FAI check</h2>
+  <p class="hint">Every saved SKU that needed First Article Inspection must have its weight and dimensions in ShipHero before anything is posted.</p>
+  <div id="fai-summary"></div>
+  <div class="dlg-actions">
+    <button class="btn" id="dlg-fai-cancel">Close</button>
+    <button class="btn" id="dlg-fai-recheck">Re-check</button>
+    <button class="btn primary" id="dlg-fai-go" disabled>Continue to upload</button>
   </div>
 </dialog>
 

@@ -164,7 +164,7 @@
   }
   // FAI: lines whose product has no weight/dimensions in ShipHero and still have units to receive
   const faiLines = (po) => (po && po.lines ? po.lines.filter((l) => l.fai && l.received < l.ordered) : []);
-  const onHold = (key) => faiLines(S.pos[key]).length > 0;
+  const isFai = (poKey, sku) => { const l = lineFor(S.pos[poKey], sku); return !!(l && l.fai); };
 
   function applyPO(po) {
     const key = norm(po.po_number);
@@ -458,14 +458,11 @@
       : how === "offline" ? `Offline — using saved copy of PO ${po.po_number}. ` : `PO ${po.po_number} ready. `;
     const kind = closed || how === "offline" ? "warn" : "ok";
     const key = cur.po;
-    if (onHold(key)) {
-      $("loc-card").hidden = true;
-      beep("err");
-      say("err", `FAI HOLD — PO ${po.po_number} has ${faiLines(po).length} SKU(s) that need First Article Inspection in ShipHero first. Do those, then tap Re-check.`);
-      setStep("po");
-      return;
-    }
-    if (S.poLoc[key]) { renderLocCard(); say(kind, `${pre}Putting away to ${S.poLoc[key].name}. Scan a SKU.`); setStep("sku"); renderPallet(); return; }
+    // FAI no longer stops the flow: FAI SKUs get flagged when scanned and must be cleared on the
+    // FAI check page before anything is posted to ShipHero.
+    const faiN = faiLines(po).length;
+    const pre2 = faiN ? `${pre}${faiN} SKU${faiN > 1 ? "s" : ""} on this PO need${faiN > 1 ? "" : "s"} FAI — they'll be flagged. ` : pre;
+    if (S.poLoc[key]) { renderLocCard(); say(faiN ? "warn" : kind, `${pre2}Putting away to ${S.poLoc[key].name}. Scan a SKU.`); setStep("sku"); renderPallet(); return; }
     // No location yet → use the default (Receiving). Scanning a location barcode later changes it.
     $("loc-card").hidden = true;
     setStep("sku");
@@ -473,7 +470,7 @@
     cur.locPending.then((loc) => {
       if (cur.po !== key) return;
       S.poLoc[key] = loc; save(); renderLocCard();
-      say(kind, `${pre}Putting away to ${loc.name} (default — scan a location to change). Scan a SKU.`);
+      say(faiN ? "warn" : kind, `${pre2}Putting away to ${loc.name} (default — scan a location to change). Scan a SKU.`);
     }).catch((e) => {
       if (cur.po !== key) return;
       beep("err");
@@ -529,10 +526,10 @@
     const lines = faiLines(po);
     if (!lines.length) return "";
     const shown = lines.slice(0, 12).map((l) => `<li><span class="mono">${esc(l.sku)}</span> <span class="sub">${esc(l.name || "")}</span></li>`).join("");
-    return `<div class="fai-hold"><b>FAI HOLD — do these first</b>
-      <div class="sub">These SKUs have no weight/dimensions in ShipHero, so they need First Article Inspection. Receive them through ShipHero's receiving screen (it prompts for FAI), then come back and tap Re-check to finish this PO here.</div>
+    return `<div class="fai-hold"><b>FAI needed — note these and keep going</b>
+      <div class="sub">These SKUs have no weight/dimensions in ShipHero. Keep receiving; they're flagged when scanned. Finish their First Article Inspection in ShipHero before uploading — the FAI check before upload makes sure.</div>
       <ul>${shown}${lines.length > 12 ? `<li class="sub">+${lines.length - 12} more</li>` : ""}</ul>
-      <button class="btn sm primary" id="btn-recheck-fai">Re-check FAI</button></div>`;
+      <button class="btn sm" id="btn-recheck-fai">Re-check FAI</button></div>`;
   }
 
   async function recheckFAI() {
@@ -543,8 +540,10 @@
       const fresh = (await api("getPO", { id: po.id })).po;
       applyPO(fresh); save(); renderOpenList();
       if (cur.po !== key) return;
-      if (onHold(key)) { renderPOCard(); beep("err"); say("err", `Still on hold: ${faiLines(S.pos[key]).length} SKU(s) need FAI.`); }
-      else { onPOReady("live"); }
+      renderPOCard(); if (cur.line) { cur.line = lineFor(S.pos[key], cur.line.sku) || cur.line; renderLineCard(); }
+      const n = faiLines(S.pos[key]).length;
+      if (n) { beep("err"); say("warn", `${n} SKU(s) on this PO still need FAI.`); } else { beep("ok"); say("ok", "All FAI done on this PO."); }
+      setStep(cur.step === "po" ? "sku" : cur.step);
     } catch (e) { beep("err"); say("err", `Couldn't re-check: ${e.message}`); }
   }
 
@@ -575,7 +574,6 @@
     if (!code) return;
     const po = S.pos[cur.po];
     if (!po) { setStep("po"); return; }
-    if (onHold(cur.po)) { beep("err"); say("err", `PO ${po.po_number} is on FAI hold. Do the FAI SKUs first, then tap Re-check.`); setStep("po"); return; }
     cur.base = null; cur.cands = null; $("in-size").value = "";
     const line = lineFor(po, code);
     if (!line) {
@@ -617,8 +615,8 @@
     cur.line = line; cur.overConfirm = null;
     if (!cur.base) $("in-sku").value = line.sku;
     renderLineCard();
-    beep("ok");
-    say("ok", `${line.sku} — scan or type the quantity.`);
+    if (line.fai) { beep("err"); say("warn", `⚠ FAI NEEDED — ${line.sku} has no weight/dims in ShipHero. Note it and keep going; it must be done before upload. Scan or type the quantity.`); }
+    else { beep("ok"); say("ok", `${line.sku} — scan or type the quantity.`); }
     $("in-qty").value = "";
     setStep("qty");
   }
@@ -652,7 +650,7 @@
     if (!l) { $("line-card").hidden = true; return; }
     const pend = pendingQty(cur.po, l.sku) + (extra || 0);
     const remaining = l.ordered - l.received - pend;
-    $("line-card").innerHTML = `<b class="mono">${esc(l.sku)}</b><div>${esc(l.name || "")}</div>
+    $("line-card").innerHTML = `<b class="mono">${esc(l.sku)}</b>${l.fai ? ' <span class="fai-tag">FAI NEEDED</span>' : ""}<div>${esc(l.name || "")}</div>
       <div class="nums">
         <div><span>Ordered</span><strong>${l.ordered}</strong></div>
         <div><span>In ShipHero</span><strong>${l.received}</strong></div>
@@ -667,7 +665,6 @@
     const po = S.pos[cur.po], l = cur.line, loc = S.poLoc[cur.po];
     if (!po || !l) { setStep("sku"); return; }
     if (!loc) { setStep("loc"); return; }
-    if (onHold(cur.po)) { beep("err"); say("err", `PO ${po.po_number} is on FAI hold.`); setStep("po"); return; }
     if (!v) return;
     if (lineFor(po, v)) { beep("err"); say("err", `That's a SKU (${v}), not a quantity. Scan or type the quantity.`); $("in-qty").select(); return; }
     if (!/^\d+$/.test(v)) { beep("err"); say("err", `"${v}" isn't a quantity. Use whole numbers only.`); $("in-qty").select(); return; }
@@ -682,10 +679,10 @@
       say("warn", `That's ${qty - Math.max(remaining, 0)} over the PO. Press Enter again to save anyway, or fix the qty.`);
       return;
     }
-    S.scans.push({ id: uid(), po: cur.po, sku: l.sku, qty, loc: { id: loc.id, name: loc.name }, ts: Date.now(), by: S.settings.receiver || "" });
+    S.scans.push({ id: uid(), po: cur.po, sku: l.sku, qty, loc: { id: loc.id, name: loc.name }, ts: Date.now(), by: S.settings.receiver || "", fai: !!l.fai });
     save();
     beep("save");
-    say("ok", `Saved ${qty} × ${l.sku} → ${loc.name}. Scan the next SKU.`);
+    say(l.fai ? "warn" : "ok", `Saved ${qty} × ${l.sku} → ${loc.name}${l.fai ? " · FAI flagged" : ""}. Scan the next SKU.`);
     cur.overConfirm = null;
     renderLineCard();
     renderRecent(); renderBadge();
@@ -697,7 +694,7 @@
   function renderRecent() {
     const list = S.scans.filter((x) => x.po === cur.po).slice(-5).reverse();
     $("recent-wrap").hidden = !list.length;
-    $("recent").innerHTML = list.map((x) => `<li><span class="mono">${esc(x.sku)}</span><span><b>${x.qty}</b> → ${esc(x.loc ? x.loc.name : "?")} · ${fmtTime(x.ts)}</span></li>`).join("");
+    $("recent").innerHTML = list.map((x) => `<li><span class="mono">${esc(x.sku)}${isFai(x.po, x.sku) ? ' <span class="fai-tag">FAI</span>' : ""}</span><span><b>${x.qty}</b> → ${esc(x.loc ? x.loc.name : "?")} · ${fmtTime(x.ts)}</span></li>`).join("");
   }
 
   function undoLast() {
@@ -763,7 +760,7 @@
           const pl = lineFor(po, ln.sku) || { ordered: 0, received: 0, name: "" };
           const after = pl.received + pendingQty(g.po, ln.sku);
           const over = after - pl.ordered;
-          return `<tr><td><span class="mono">${esc(ln.sku)}</span>${over > 0 ? `<span class="over-tag">+${over} over</span>` : ""}<div class="sub">${esc(pl.name || "")}</div></td>
+          return `<tr><td><span class="mono">${esc(ln.sku)}</span>${pl.fai ? '<span class="fai-tag">FAI</span>' : ""}${over > 0 ? `<span class="over-tag">+${over} over</span>` : ""}<div class="sub">${esc(pl.name || "")}</div></td>
             <td class="num"><b>${ln.qty}</b><div class="sub">${ln.scans} scan${ln.scans > 1 ? "s" : ""}</div></td>
             <td class="num">${pl.received} → ${after}<div class="sub">of ${pl.ordered}</div></td>
             <td class="num"><button class="link" data-del-sku="${esc(k)}" data-sku="${esc(ln.sku)}" aria-label="Remove">✕</button></td></tr>`;
@@ -804,7 +801,67 @@
   // ---------------------------------------------------------------- upload
   let uploading = false;
 
-  function openUpload() {
+  // ---- FAI check: every FAI-flagged SKU in the saved scans must show weight/dims in ShipHero
+  // (i.e. its First Article Inspection is done) before anything is posted.
+  function faiPending() {
+    const out = {};
+    for (const x of S.scans) {
+      if (!isFai(x.po, x.sku)) continue;
+      const k = `${x.po}|${norm(x.sku)}`;
+      const l = lineFor(S.pos[x.po], x.sku);
+      const o = out[k] || (out[k] = { po: x.po, po_number: (S.pos[x.po] || {}).po_number || x.po, sku: l ? l.sku : x.sku, name: l ? l.name : "", qty: 0 });
+      o.qty += x.qty;
+    }
+    return Object.values(out);
+  }
+  function everFlagged() {
+    const seen = {};
+    for (const x of S.scans) if (x.fai || isFai(x.po, x.sku)) seen[`${x.po}|${norm(x.sku)}`] = { po: x.po, sku: x.sku };
+    return Object.values(seen);
+  }
+  async function refreshScanPOs() {
+    const keys = [...new Set(S.scans.map((x) => x.po))];
+    let failed = 0;
+    for (const k of keys) {
+      const po = S.pos[k];
+      try { applyPO((await api("getPO", po && po.id ? { id: po.id } : { po_number: k }, { retries: 2 })).po); }
+      catch (e) { failed++; }
+    }
+    save();
+    return failed;
+  }
+  async function faiCheck() {
+    const go = $("dlg-fai-go"), again = $("dlg-fai-recheck");
+    go.disabled = true; again.disabled = true;
+    $("fai-summary").innerHTML = `<p class="hint">Checking ShipHero…</p>`;
+    if (!$("dlg-fai").open) $("dlg-fai").showModal();
+    const failed = await refreshScanPOs();
+    const left = faiPending();
+    const done = everFlagged().filter((f) => !isFai(f.po, f.sku));
+    const rows = left.map((f) => `<li class="fai-row bad"><span>✖</span><span class="grow"><span class="mono">${esc(f.sku)}</span> · PO ${esc(f.po_number)}<div class="sub">${esc(f.name || "")} · ${f.qty} units saved · no weight/dims in ShipHero yet</div></span></li>`)
+      .concat(done.map((f) => `<li class="fai-row ok"><span>✔</span><span class="grow"><span class="mono">${esc(f.sku)}</span> · PO ${esc((S.pos[f.po] || {}).po_number || f.po)}<div class="sub">FAI done</div></span></li>`));
+    $("fai-summary").innerHTML = (failed ? `<div class="alert warn">Couldn't refresh ${failed} PO(s) from ShipHero — showing the last saved data.</div>` : "")
+      + (left.length
+        ? `<p><b>${left.length}</b> SKU${left.length > 1 ? "s" : ""} still need${left.length > 1 ? "" : "s"} FAI. Finish them in ShipHero (weight + dimensions), then tap <b>Re-check</b>.</p>`
+        : `<p class="ok-text"><b>All FAI done.</b> You can upload.</p>`)
+      + (rows.length ? `<ul class="fai-check">${rows.join("")}</ul>` : "");
+    again.disabled = false;
+    go.disabled = left.length > 0;
+    renderSaved();
+    return left.length === 0;
+  }
+
+  async function openUpload() {
+    if (!Object.keys(groupPending()).length) return;
+    // Any FAI SKU among the saved scans → the FAI check page comes first.
+    if (everFlagged().length || S.scans.some((x) => isFai(x.po, x.sku))) {
+      const ok = await faiCheck();
+      if (!ok) return;
+      $("dlg-fai").close();
+    }
+    showUploadConfirm();
+  }
+  function showUploadConfirm() {
     const groups = Object.values(groupPending());
     if (!groups.length) return;
     const units = groups.reduce((a, g) => a + g.units, 0);
@@ -903,8 +960,9 @@
     } catch (e) {
       return stopBatch(b, `Couldn't read the PO from ShipHero: ${e.message}`, !anyApplied(b) && !e.network);
     }
-    if (!anyApplied(b) && faiLines(po).length) {
-      return releaseBatch(b, `FAI hold: ${faiLines(po).length} SKU(s) on PO ${po.po_number} need First Article Inspection in ShipHero first (${faiLines(po).slice(0, 5).map((l) => l.sku).join(", ")}${faiLines(po).length > 5 ? "…" : ""}). Scans kept.`);
+    const faiHere = b.lines.filter((l) => { const pl = lineFor(po, l.sku); return pl && pl.fai; });
+    if (!anyApplied(b) && faiHere.length) {
+      return releaseBatch(b, `FAI not done: ${faiHere.slice(0, 5).map((l) => l.sku).join(", ")}${faiHere.length > 5 ? "…" : ""} on PO ${po.po_number} still have no weight/dims in ShipHero. Finish FAI, then upload again. Scans kept.`);
     }
     if (!b.before) {
       const missing = b.lines.filter((l) => !lineFor(po, l.sku));
@@ -1064,6 +1122,9 @@
     $("btn-upload").onclick = openUpload;
     $("dlg-upload-go").onclick = startUpload;
     $("dlg-upload-cancel").onclick = () => $("dlg-upload").close();
+    $("dlg-fai-cancel").onclick = () => $("dlg-fai").close();
+    $("dlg-fai-recheck").onclick = () => faiCheck();
+    $("dlg-fai-go").onclick = () => { $("dlg-fai").close(); showUploadConfirm(); };
     $("btn-export").onclick = exportCSV;
     $("btn-settings").onclick = () => openSettings();
     $("dlg-settings-save").onclick = saveSettings;

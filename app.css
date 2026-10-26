@@ -159,3 +159,14 @@ td .sub{ font-size:12px; color:var(--pl-grey-soft); }
 .plist .sub{ font-size:12px; color:var(--pl-grey-soft); }
 @media (max-width:420px){ .pallet .p-num{ font-size:56px; } }
 .pallet .priority-flag{ display:table; }
+
+/* FAI flags (non-blocking) + FAI check page */
+.fai-tag{ display:inline-block; font-size:11px; font-weight:800; letter-spacing:.4px; color:#6B3F00; background:#FFE2A8; border:1px solid #F2B84B; padding:1px 6px; border-radius:6px; margin-left:4px; vertical-align:middle; }
+.fai-check{ list-style:none; padding:0; margin:8px 0 0; max-height:50vh; overflow:auto; }
+.fai-row{ display:flex; gap:10px; padding:8px 0; border-top:1px solid var(--pl-line); font-size:14px; }
+.fai-row:first-child{ border-top:0; }
+.fai-row .grow{ flex:1; min-width:0; }
+.fai-row .sub{ font-size:12px; color:var(--pl-grey-soft); }
+.fai-row.bad > span:first-child{ color:var(--err); font-weight:800; }
+.fai-row.ok > span:first-child{ color:var(--ok); font-weight:800; }
+.ok-text{ color:var(--ok); }
