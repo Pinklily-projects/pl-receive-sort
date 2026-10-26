@@ -682,13 +682,15 @@
     S.scans.push({ id: uid(), po: cur.po, sku: l.sku, qty, loc: { id: loc.id, name: loc.name }, ts: Date.now(), by: S.settings.receiver || "", fai: !!l.fai });
     save();
     beep("save");
-    say(l.fai ? "warn" : "ok", `Saved ${qty} × ${l.sku} → ${loc.name}${l.fai ? " · FAI flagged" : ""}. Scan the next SKU.`);
+    say(l.fai ? "warn" : "ok", `Saved ${qty} × ${l.sku} → ${loc.name}${l.fai ? " · FAI flagged" : ""}. Scan the next PO.`);
     cur.overConfirm = null;
     renderLineCard();
     renderRecent(); renderBadge();
-    cur.base = null; cur.cands = null;
-    $("in-qty").value = ""; $("in-sku").value = ""; $("in-size").value = "";
-    setStep("sku");
+    // Every item starts with a PO scan: PO → SKU → Qty, then back to PO.
+    // (PO card, pallet banner and last line stay on screen until the next PO is scanned.)
+    cur.base = null; cur.cands = null; cur.line = null;
+    $("in-qty").value = ""; $("in-sku").value = ""; $("in-size").value = ""; $("in-po").value = "";
+    setStep("po");
   }
 
   function renderRecent() {
@@ -1075,7 +1077,7 @@
     if (name === "saved") renderSaved();
     if (name === "history") renderHistory();
     if (name === "pallets") renderPalletList();
-    if (name === "scan") setStep(cur.po ? cur.step === "po" ? (S.poLoc[cur.po] ? "sku" : "loc") : cur.step : "po");
+    if (name === "scan") setStep(cur.po ? cur.step : "po");
   }
 
   function setNet() { $("net").classList.toggle("off", !navigator.onLine); $("net").title = navigator.onLine ? "Online" : "Offline — scans still save"; }
