@@ -1049,7 +1049,6 @@
     onEnter($("in-sku"), onSku);
     onEnter($("in-size"), onSize);
     onEnter($("in-qty"), onQty);
-    $("in-po").addEventListener("change", () => { const v = $("in-po").value; if (S.pos[norm(v)] && document.activeElement === $("in-po")) loadPO(v); });
     $("size-opts").addEventListener("click", (e) => {
       const b = e.target.closest("button[data-cand]");
       if (b && cur.cands) pickLine(cur.cands[+b.dataset.cand]);
